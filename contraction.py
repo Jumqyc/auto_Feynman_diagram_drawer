@@ -96,11 +96,12 @@ class Diagram:
         Inner vertices: {self.inner_vertices}
         Propagators: {self.propagators}'''
 
-def contraction(operators:list[Field]) -> list[tuple[Diagram,int]]:
+def contraction(operators:list[Field],LSZ_reduction:bool = False) -> list[tuple[Diagram,int]]:
     """
     Perform Wick contraction on a list of quantum field operators.
     Args:
         operators (list[Field]): A list of quantum field operators to be contracted.
+        LSZ_reduction (bool): If True, treat external operators as external fields. Apply LSZ reduction by forbidding external operators contract. Default is False.
     Returns:
         diagrams (list[tuple[Diagram,int]]): A list of tuples, each containing a Diagram object representing a unique contraction and an integer representing its multiplicity.
     Raises:
@@ -161,6 +162,8 @@ def contraction(operators:list[Field]) -> list[tuple[Diagram,int]]:
         for i in range(1,len(to_be_contract)): # contract the first operator with the ith operator
             if (i < len(to_be_contract) - 1) and (to_be_contract[i] == to_be_contract[i+1]): # if the two operators are the same, we skip the next one to avoid double counting
                 multiplicity_in_this_layer += 1
+                continue
+            elif LSZ_reduction and to_be_contract[0].external and to_be_contract[i].external: # if LSZ reduction is applied, we cannot contract external operators
                 continue
             try:
                 pair = to_be_contract[0] + to_be_contract[i]
