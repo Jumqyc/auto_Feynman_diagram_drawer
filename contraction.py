@@ -1,102 +1,103 @@
-class Field:
+from dataclasses import dataclass,field
+from typing import ClassVar, List, Tuple
+
+
+@dataclass(order=True, frozen=True, slots=True)
+class Operator:
     '''
     A class representing a quantum field operator.
-
     Attributes:
-
-    pos (str): The position of the operator in the diagram.
-    type (str): The type of the operator (e.g., 'phi', 'psi').
-    dagger (int): 1 for creation operator, -1 for annihilation operator, 0 for real field.
-    statistics (bool): True for fermionic operators, False for bosonic operators.
-    external (bool): True if the operator is external, False if internal.
-
-    Methods:
-
-    __add__(self, other): Contract two operators to form a propagator. Raises TypeError if the operators cannot be contracted.
-    __eq__(self, other): Check if two operators are equal.
-    __lt__(self, other): Compare two operators for sorting.
-    __repr__(self): Return a string representation of the operator.
+        pos (str): The position or label of the operator (e.g., 'x', 'y', 'p1', 'k2').
+        type (str): The type of the particle (e.g., 'e' for electron, 'a' for photon).
+        charge (int): The charge of the operator (1 for creation, -1 for annihilation, 0 for neutral).
+        fermionic (bool): True if the operator is fermionic, False if bosonic. We will not consider some exotic statistics here.
+        external (bool): True if the operator is external, False if internal.
     '''
-    def __init__(self,pos:str,
-                 type:str,
-                 dagger:int,
-                 fermionic:bool=False,
-                 external:bool = False)->None:
-        self.pos = pos
-        self.type = type
-        self.dagger = dagger
-        self.fermionic = fermionic
-        self.external = external
-        if dagger not in [1,-1,0]:
-            raise ValueError("dagger must be 1 (particle), -1 (antiparticle) or 0 (real).")
-    def __add__(self:'Field',other:'Field') -> 'Propagator': # contraction of two operators to a propagator
-        if self.type != other.type or self.dagger + other.dagger != 0:
-            raise TypeError("Cannot contract these operators.")
-        
-        if self.dagger == 1 and other.dagger == -1:
-            return Propagator(type=self.type,
-                              initial=self.pos,
-                              final=other.pos,
-                              arrow=True)
-        elif self.dagger == -1 and other.dagger == 1:
-            return Propagator(type=self.type,
-                              initial=other.pos,
-                              final=self.pos,
-                              arrow=True)
-        else:
-            return Propagator(type=self.type,
-                              initial=self.pos,
-                              final=other.pos,
-                              arrow=False)
-    def __eq__(self,other): # equal if pos, type and dagger are all equal
-        return self.pos == other.pos and self.type == other.type and self.dagger == other.dagger
-    def __lt__(self,other): # less than for sorting
-        return (self.pos,self.type,self.dagger) < (other.pos,other.type,other.dagger)
-    def __repr__(self):
-        return str((self.pos))
+    pos: str
+    type: str
+    charge: int
+    fermionic: bool = False
+    external: bool = False
+
+    VALID_CHARGES: ClassVar = {1, -1, 0}
+
+    def __post_init__(self):
+        if self.charge not in self.VALID_CHARGES:
+            raise ValueError("charge must be 1, -1, or 0")
     
-class Propagator:
-    def __init__(self,type:str,arrow:bool,initial:str,final:str):
-        self.type = type
-        self.initial = initial
-        self.final = final
-        self.arrow = arrow
-    def __eq__(self:'Propagator',other:'Propagator'):
-        return (self.type,self.initial,self.final,self.arrow) == (other.type,other.initial,other.final,other.arrow)
-    def __lt__(self:'Propagator',other:'Propagator'):
-        return (self.type,self.initial,self.final,self.arrow) < (other.type,other.initial,other.final,other.arrow)
-    def __repr__(self)-> str:
-        if self.arrow:
-            return f"{self.type}({self.initial}->-{self.final})"
+    def __add__(self, other: 'Operator') -> 'Propagator':
+        if not self.__can_contract_with__(other):
+            raise TypeError("Cannot contract these operators.")
+        elif self.charge == 1 and other.charge == -1:
+            return Propagator(self.type, self.pos, other.pos, True)
+        elif self.charge == -1 and other.charge == 1:
+            return Propagator(self.type, other.pos, self.pos, True)
         else:
-            return f"{self.type}({self.initial}---{self.final})"
-        
+            return Propagator(self.type, self.pos, other.pos, False)
+
+    def __can_contract_with__(self, other: 'Operator') -> bool:
+        return (self.type == other.type and
+                self.fermionic == other.fermionic and
+                self.charge + other.charge == 0)
+
+@dataclass(order=True, frozen=True, slots=True)
+class Propagator:
+    '''
+    A class representing a propagator in a Feynman diagram.
+    Attributes:
+        type (str): The type of the particle (e.g., 'e' for electron, 'a' for photon).
+        initial (str): The initial vertex of the propagator.
+        final (str): The final vertex of the propagator.
+        arrow (bool): True if the propagator has an arrow (fermionic), False otherwise (bosonic).
+    '''
+    type: str
+    initial: str
+    final: str
+    arrow: bool
+    def __repr__(self) -> str:
+        return f"{self.type}: {self.initial}{"->-" if self.arrow else "---"}{self.final}"
+    def __eq__(self:'Propagator', other: 'Propagator') -> bool:
+        if self.type != other.type or self.arrow != other.arrow:
+            return False
+        elif self.arrow:
+            return (self.initial,self.final) == (other.initial,other.final) # arrow direction matters
+        else:
+            return ((self.initial,self.final) == (other.initial,other.final)) or ((self.initial,self.final) == (other.final,other.initial)) # direction does not matter
+
+@dataclass(frozen=True)
 class Diagram:
     '''
-    A class describing  the structure of Feynman Diagrams.
+    A class representing a Feynman diagram.
+    Attributes:
+        outer_vertices (Tuple[str, ...]): A tuple of outer vertex labels.
+        inner_vertices (Tuple[str, ...]): A tuple of inner vertex labels.
+        propagators (Tuple[Propagator, ...]): A tuple of Propagator objects representing the connections between vertices.
+    Properties:
+        list_of_particles (List[Tuple[str, bool]]): A list of unique particle types and their statistics (charged or uncharged) present in the diagram.
+    Methods:
+        is_equivalent(other: 'Diagram') -> bool: Check if two diagrams are equivalent (isomorphic).
     '''
-    def __init__(self,outer_vertices:set[str],
-                 inner_vertices:set[str],
-                 propagators:list[Propagator]):
-        self.outer_vertices = outer_vertices
-        self.inner_vertices = inner_vertices
-        self.propagators = propagators
-
-        self.list_of_particles = list(set((p.type,p.arrow) for p in propagators))
-
-    def __eq__(self:'Diagram',other:'Diagram') -> bool:
-        if self.outer_vertices != other.outer_vertices or self.inner_vertices != other.inner_vertices:
-            return False
-        if not self.propagators.sort() == other.propagators.sort():
-            return False
-        # we haven't implement the symmetry for internal vertices yet
-        return True
-    def __repr__(self)->str:
-        return f'''     Outer vertices: {self.outer_vertices}
+    outer_vertices: Tuple[str, ...] = field(compare=True)
+    inner_vertices: Tuple[str, ...] = field(compare=True)  
+    propagators: Tuple[Propagator, ...] = field(compare=True)
+    
+    def __post_init__(self):
+        object.__setattr__(self, 'propagators', tuple(sorted(self.propagators)))
+    
+    @property
+    def list_of_particles(self) -> List[Tuple[str, bool]]:
+        return list(set((p.type, p.arrow) for p in self.propagators))
+    
+    def __repr__(self) -> str:
+        return f"""Outer vertices: {self.outer_vertices}
         Inner vertices: {self.inner_vertices}
-        Propagators: {self.propagators}'''
+        Propagators: {self.propagators}"""
+    def is_equivalent(self, other: 'Diagram') -> bool:
+        pass
+    
 
-def contraction(operators:list[Field],LSZ_reduction:bool = False) -> list[tuple[Diagram,int]]:
+
+def contraction(operators:list[Operator],LSZ_reduction:bool = False) -> list[tuple[Diagram,int]]:
     """
     Perform Wick contraction on a list of quantum field operators.
     Args:
@@ -140,18 +141,18 @@ def contraction(operators:list[Field],LSZ_reduction:bool = False) -> list[tuple[
     """
     if len(operators) % 2 != 0:
         raise ValueError("The number of operators must be even for contraction.")
-    if not isinstance(operators, list) and not all(isinstance(op, Field) for op in operators):
+    if not isinstance(operators, list) and not all(isinstance(op, Operator) for op in operators):
         raise ValueError('The type of the operator must be type field in the list')
-    if not sum(op.dagger for op in operators) == 0:
+    if not sum(op.charge for op in operators) == 0:
         raise ValueError("The number of creation and annihilation operators must be equal.")
 
-    
-    inner_vertices = set(op.pos for op in operators if not op.external)
-    outer_vertices = set(op.pos for op in operators if op.external)
+    inner_vertices = tuple(set(op.pos for op in operators if not op.external))
+    outer_vertices = tuple(set(op.pos for op in operators if op.external))
 
     operators.sort()
     all_possible_contraction = []
-    def contract(to_be_contract:list[Field],
+
+    def contract(to_be_contract:list[Operator],
                  contracted:list[Propagator] = [],
                  multiplicity:int = 1)->list[tuple[list[Propagator],int]]:
         if len(to_be_contract) == 2: # if there is only one pair left, contract them
@@ -181,14 +182,25 @@ def contraction(operators:list[Field],LSZ_reduction:bool = False) -> list[tuple[
         return all_possible_contraction # the multiplicity is 1 for now, we haven't implemented symmetry for internal vertices yet
     return_list = []
     for propagators , multiplicity in contract(operators):
+        if len(propagators) != len(operators) // 2:
+            continue
         return_list.append(
-            (Diagram(outer_vertices,inner_vertices,propagators),
+            (Diagram(outer_vertices,inner_vertices,tuple(propagators)),
              multiplicity))
-        
+    if return_list == []:
+        raise ValueError("No valid contraction found. Please check the input operators.")
     return return_list
-
-for diagram,multiplicity in contraction([Field('a','f',0,fermionic=True),
-            Field('b','f',0,fermionic=True),
-            Field('c','f',0,fermionic=True),
-            Field('d','f',0,fermionic=True)]):
-    print(f"Multiplicity: {multiplicity}", diagram)
+if __name__ == "__main__":
+    operators = [Operator('1','e',1,fermionic=True,external=True),
+                Operator('2','e',1,fermionic=True,external=True),
+                Operator('3','e',-1,fermionic=True,external=True),
+                Operator('4','e',-1,fermionic=True,external=True),
+                Operator('x','a',0,fermionic=False,external=False),
+                Operator('y','a',0,fermionic=False,external=False),
+                Operator('x','e',1,fermionic=True,external=False),
+                Operator('y','e',1,fermionic=True,external=False),
+                Operator('x','e',-1,fermionic=True,external=False),
+                Operator('y','e',-1,fermionic=True,external=False)]
+    # ee -> ee scattering with internal photon exchange
+    for diagram,multiplicity in contraction(operators,LSZ_reduction=True):
+        print(f"Multiplicity: {multiplicity}", diagram)
